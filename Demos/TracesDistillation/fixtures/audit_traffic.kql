@@ -1,0 +1,63 @@
+// Replace these values with the approved batch's UTC window and fixed version.
+let Start = datetime(2026-09-05T00:00:00Z);
+let End = datetime(2026-09-06T00:00:00Z);
+let AgentName = "zava-traces-demo";
+let AgentVersion = "1";
+let agentRequests = materialize(
+    requests
+    | where timestamp between (Start .. End)
+    | extend foundryAgentName = coalesce(
+        tostring(customDimensions["gen_ai.agent.name"]),
+        tostring(customDimensions["azure.ai.agentserver.agent_name"])
+      ),
+      agentId = tostring(customDimensions["gen_ai.agent.id"])
+    | where foundryAgentName == AgentName
+    | extend agentVersion = coalesce(
+        tostring(customDimensions["gen_ai.agent.version"]),
+        extract(@":([^:]+)$", 1, agentId),
+        tostring(customDimensions["azure.ai.agentserver.agent_version"])
+      )
+    | where isempty(agentVersion) or agentVersion == AgentVersion
+    | summarize requestRows=count(),
+        failedRequests=countif(success == false),
+        firstSeen=min(timestamp), lastSeen=max(timestamp),
+        versions=make_set(agentVersion),
+        responseIds=make_set(tostring(customDimensions["azure.ai.agentserver.response_id"])),
+        conversationIds=make_set(coalesce(
+            tostring(customDimensions["gen_ai.conversation.id"]),
+            tostring(customDimensions["azure.ai.agentserver.conversation_id"])
+          ))
+      by operation_Id
+);
+let agentSpans =
+    dependencies
+    | where timestamp between (Start .. End)
+    | where operation_Id in (agentRequests | project operation_Id)
+    | extend operation=tostring(customDimensions["gen_ai.operation.name"]),
+        inputs=tostring(customDimensions["gen_ai.input.messages"]),
+        outputs=tostring(customDimensions["gen_ai.output.messages"]),
+        toolArguments=tostring(customDimensions["gen_ai.tool.call.arguments"]),
+        toolResult=tostring(customDimensions["gen_ai.tool.call.result"]),
+        inputTokens=tolong(customDimensions["gen_ai.usage.input_tokens"]),
+        outputTokens=tolong(customDimensions["gen_ai.usage.output_tokens"])
+    | summarize dependencyFailures=countif(success == false),
+        toolCalls=countif(operation == "execute_tool"),
+        toolNames=make_set_if(tostring(customDimensions["gen_ai.tool.name"]), operation == "execute_tool"),
+        toolArgumentsRecorded=countif(operation == "execute_tool" and isnotempty(toolArguments)),
+        toolResultsRecorded=countif(operation == "execute_tool" and isnotempty(toolResult)),
+        agentInputRecorded=countif(operation == "invoke_agent" and isnotempty(inputs)),
+        agentOutputRecorded=countif(operation == "invoke_agent" and isnotempty(outputs)),
+        agentInputJapanese=countif(operation == "invoke_agent" and inputs matches regex @"[\p{Hiragana}\p{Katakana}\p{Han}]"),
+        agentOutputJapanese=countif(operation == "invoke_agent" and outputs matches regex @"[\p{Hiragana}\p{Katakana}\p{Han}]"),
+        replacementCharacters=countif(strcat(inputs, outputs, toolArguments, toolResult) contains "\uFFFD"),
+        agentUsageSpans=countif(operation == "invoke_agent" and isnotnull(inputTokens) and isnotnull(outputTokens)),
+        agentInputTokens=sumif(inputTokens, operation == "invoke_agent"),
+        agentOutputTokens=sumif(outputTokens, operation == "invoke_agent"),
+        modelCalls=countif(operation == "chat"),
+        modelInputTokens=sumif(inputTokens, operation == "chat"),
+        modelOutputTokens=sumif(outputTokens, operation == "chat")
+      by operation_Id;
+agentRequests
+| join kind=leftouter agentSpans on operation_Id
+| project-away operation_Id1
+| order by firstSeen asc

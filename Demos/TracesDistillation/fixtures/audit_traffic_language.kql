@@ -1,0 +1,46 @@
+// Inspect token lists against the identifier allowlist; do not export message text.
+let Start = datetime(2026-09-05T08:12:54Z);
+let End = datetime(2026-09-05T09:30:00Z);
+let RequestIds = requests
+    | where timestamp between (Start .. End)
+    | where coalesce(
+        tostring(customDimensions["gen_ai.agent.name"]),
+        tostring(customDimensions["azure.ai.agentserver.agent_name"])
+      ) == "zava-traces-demo"
+    | where tostring(customDimensions["gen_ai.agent.version"]) == "1"
+    | distinct operation_Id;
+let LastModel = dependencies
+    | where timestamp between (Start .. End)
+    | where operation_Id in (RequestIds)
+    | where customDimensions["gen_ai.operation.name"] == "chat"
+    | summarize arg_max(timestamp, customDimensions) by operation_Id;
+let OutputText = LastModel
+    | mv-expand msg=parse_json(tostring(customDimensions["gen_ai.output.messages"]))
+    | where tostring(msg.role) == "assistant"
+    | mv-expand part=msg.parts
+    | where tostring(part.type) == "text"
+    | project operation_Id, contentKind="assistant", text=tostring(part.content);
+let InputText = LastModel
+    | mv-expand msg=parse_json(tostring(customDimensions["gen_ai.input.messages"]))
+    | where tostring(msg.role) == "user"
+    | mv-expand part=msg.parts
+    | where tostring(part.type) == "text"
+    | project operation_Id, contentKind="user", text=tostring(part.content);
+let ToolSummaries = dependencies
+    | where timestamp between (Start .. End)
+    | where operation_Id in (RequestIds)
+    | where customDimensions["gen_ai.tool.name"] == "submit_resolution"
+    | extend result=parse_json(tostring(customDimensions["gen_ai.tool.call.result"]))
+    | project operation_Id, contentKind="tool_summary", text=tostring(result.resolution_summary);
+union InputText, OutputText, ToolSummaries
+| extend identifiersRemoved=replace_regex(
+    text,
+    @"(?:ORD-\d{3,6}|ITEM-\d{3,6}-\d+|SKU-\d{3}-[1-3]|(?:POLICY|INVENTORY|CALC)-[A-F0-9]{12}|CASE-[A-F0-9]{10})",
+    ""
+  )
+| project operation_Id, contentKind,
+    characterCount=strlen(text),
+    hasJapanese=text matches regex @"[\p{Hiragana}\p{Katakana}\p{Han}]",
+    hasReplacementCharacter=text contains "\uFFFD",
+    asciiTokens=extract_all(@"([A-Za-z][A-Za-z0-9_]*)", identifiersRemoved)
+| order by operation_Id asc, contentKind asc

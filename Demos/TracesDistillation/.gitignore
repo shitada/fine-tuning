@@ -1,0 +1,5 @@
+.venv/
+.ipynb_checkpoints/
+run/
+# Environment identifiers and execution history travel through OneDrive, not Git.
+EXECUTION_LOG.md

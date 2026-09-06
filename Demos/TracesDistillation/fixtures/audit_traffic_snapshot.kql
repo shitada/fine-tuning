@@ -1,0 +1,36 @@
+// Verify that the last model input retains every observed tool call/result pair.
+let Start = datetime(2026-09-05T08:12:54.462Z);
+let End = datetime(2026-09-05T08:33:55.144Z);
+let R = requests
+    | where timestamp between (Start .. End)
+    | where customDimensions["gen_ai.agent.name"] == "zava-traces-demo"
+    | where customDimensions["gen_ai.agent.version"] == "1"
+    | distinct operation_Id;
+let D = materialize(
+    dependencies
+    | where timestamp between (Start .. End)
+    | where operation_Id in (R)
+);
+let T = D
+    | where customDimensions["gen_ai.operation.name"] == "execute_tool"
+    | summarize toolCount=count(),
+        toolIds=make_set(tostring(customDimensions["gen_ai.tool.call.id"]))
+      by operation_Id;
+D
+| where customDimensions["gen_ai.operation.name"] == "chat"
+| summarize arg_max(timestamp, customDimensions) by operation_Id
+| mv-expand msg=parse_json(tostring(customDimensions["gen_ai.input.messages"]))
+| mv-expand part=msg.parts
+| extend partType=tostring(part.type), callId=tostring(part.id)
+| summarize userParts=countif(tostring(msg.role) == "user"),
+    toolCallParts=countif(partType == "tool_call"),
+    toolResultParts=countif(partType == "tool_call_response"),
+    callIds=make_set_if(callId, partType == "tool_call"),
+    resultIds=make_set_if(callId, partType == "tool_call_response")
+  by operation_Id
+| join kind=leftouter T on operation_Id
+| project operation_Id, userParts, toolCallParts, toolResultParts, toolCount,
+    callIdCount=array_length(callIds),
+    resultIdCount=array_length(resultIds),
+    missingCallIds=set_difference(toolIds, callIds),
+    missingResultIds=set_difference(toolIds, resultIds)

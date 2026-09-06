@@ -1,0 +1,7 @@
+.azure
+.env
+.azd-client.json
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/

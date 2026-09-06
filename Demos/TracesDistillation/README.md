@@ -31,11 +31,13 @@ The `gpt-4.1-nano` student, fine-tuned on traces from a `gpt-4.1-mini` teacher a
   - Use any existing agent (any hosted Foundry agent emits traces automatically)
   - Or run `fixtures/push_prompts.py` against your agent to populate trace history
 - One **student** model deployment that supports fine-tuning (e.g. `gpt-4.1-nano`, `gpt-4.1-mini`)
-- Azure CLI (`az login`) for authentication and deployment
+- Authentication:
+  - GitHub Copilot guided path: Azure MCP sign-in and `DefaultAzureCredential` (no Azure CLI or API key)
+  - Standalone notebook path: Azure CLI and an Azure OpenAI API key
 - Python 3.11+ with:
 
 ```bash
-pip install openai>=2.0 azure-ai-projects>=2.2.0 azure-identity>=1.21 azure-ai-evaluation>=1.0
+pip install openai>=2.0 azure-ai-projects>=2.4.0 azure-identity>=1.21 azure-ai-evaluation>=1.0
 ```
 
 ## Files in this folder
@@ -48,6 +50,19 @@ pip install openai>=2.0 azure-ai-projects>=2.2.0 azure-identity>=1.21 azure-ai-e
 | `fixtures/zava_tools.json` | Sample tool catalog (OpenAI chat-completions format) — replace with your own |
 
 ## Run it
+
+For a step-by-step run entirely through GitHub Copilot, with Azure resources
+queried and updated through Azure MCP instead of Azure CLI or manual portal
+operations, use [COPILOT_INSTRUCTIONS.md](COPILOT_INSTRUCTIONS.md). That guide
+also replaces the notebook's API-key setup, legacy Data Generation SDK call,
+and Azure CLI deployment cell.
+
+To continue an existing run on another Windows PC using the same OneDrive
+folder, read [MACHINE_HANDOFF.md](MACHINE_HANDOFF.md) before running any step.
+Execution history, environment settings, and the local handoff bundle are
+intentionally excluded from Git; cloning alone does not restore an existing run.
+
+### Standalone notebook (legacy authentication path)
 
 ```bash
 export AZURE_AI_PROJECT_ENDPOINT="https://<resource>.services.ai.azure.com/api/projects/<project>"
